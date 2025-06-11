@@ -490,6 +490,25 @@ user_id price
 
 See also: [Writing a Python SQL engine from scratch](https://github.com/tobymao/sqlglot/blob/main/posts/python_sql_engine.md).
 
+### Stored Procedure Transpilation with LLM
+
+SQLGlot includes helpers to handle stored procedures using a local LLM such as [Ollama](https://ollama.ai/). The LLM extracts transpilable SQL from the procedure and the resulting queries are wrapped in SingleStore syntax.
+
+```python
+from sqlglot import transpile_procedure
+
+proc = """
+CREATE PROCEDURE p AS
+BEGIN
+  SELECT * FROM foo;
+END
+"""
+
+print(transpile_procedure(proc))
+```
+
+The wrapper sends prompts to `http://localhost:11434/api/generate` by default and returns a `DELIMITER`-wrapped procedure ready for execution in SingleStore.
+
 ## Used By
 
 * [SQLMesh](https://github.com/TobikoData/sqlmesh)
