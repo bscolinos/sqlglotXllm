@@ -28,7 +28,7 @@ STORED_PROCEDURE_PROMPT = (
     "DDL inside a pipeline) are either removed or rewritten to SingleStore "
     "equivalents.\n"
     "\u2022 Preserve nested DECLARE blocks, %ROWTYPE and %TYPE uses, and loop or "
-    "control-flow constructs, translating them into SingleStore’s procedural "
+    "control-flow constructs, translating them into SingleStore's procedural "
     "extensions.\n"
     "At the end, output the converted procedure code only, formatted with "
     "appropriate DELIMITER commands and SQL fences.\n\n"
@@ -37,10 +37,20 @@ STORED_PROCEDURE_PROMPT = (
 )
 
 BREAKDOWN_PROMPT = (
-    "List each data manipulation statement (SELECT, INSERT, UPDATE, DELETE, "
-    "MERGE) from the following stored procedure. Return one statement per "
-    "line in the same order and do not include any additional text.\n\n"
-    "STORED_PROCEDURE:\n{procedure}\n\nSTATEMENTS:"
+    "Extract the executable SQL statements from this stored procedure. "
+    "Return each complete statement separated by '---STATEMENT---' markers.\n\n"
+    "Rules:\n"
+    "- Include complete statements only (SET commands, full SELECT queries with all clauses, etc.)\n"
+    "- Do NOT break multi-line statements into pieces\n"
+    "- A SELECT with CTE (WITH clause) should be ONE complete statement\n"
+    "- Skip CREATE PROCEDURE, BEGIN, END, and GO statements\n\n"
+    "Format your response like this:\n"
+    "---STATEMENT---\n"
+    "SET NOCOUNT ON;\n"
+    "---STATEMENT---\n"
+    "WITH CustomerActivity AS (...complete CTE and SELECT...)\n"
+    "---STATEMENT---\n\n"
+    "STORED_PROCEDURE:\n{procedure}\n\nEXTRACTED STATEMENTS:"
 )
 
 REASSEMBLE_PROMPT = (
@@ -73,12 +83,41 @@ class LLMWrapper:
         """Use the LLM to extract DML statements from a stored procedure."""
         prompt = BREAKDOWN_PROMPT.format(procedure=sql)
         messages = [
-            {"role": "system", "content": "You extract SQL statements."},
+            {"role": "system", "content": "You are a SQL expert who extracts complete SQL statements from stored procedures. Use the exact format requested with ---STATEMENT--- delimiters."},
             {"role": "user", "content": prompt},
         ]
         response = ollama.chat(model=self.model, messages=messages)
         content = response["message"]["content"]
-        return [line.strip() for line in content.splitlines() if line.strip()]
+        
+        # Split by the delimiter and extract statements
+        parts = content.split('---STATEMENT---')
+        statements = []
+        
+        for part in parts:
+            # Clean up the part
+            part = part.strip()
+            if not part:
+                continue
+                
+            # Remove common prefixes that might appear
+            lines = [line.strip() for line in part.splitlines() if line.strip()]
+            if not lines:
+                continue
+                
+            # Skip explanatory text
+            clean_lines = []
+            for line in lines:
+                if line.startswith(('Here are', 'The statements', 'EXTRACTED STATEMENTS', 'Format your response')):
+                    continue
+                clean_lines.append(line)
+            
+            if clean_lines:
+                statement = ' '.join(clean_lines)
+                statement = statement.replace('  ', ' ').strip()
+                if statement and not statement.lower().startswith(('create procedure', 'begin', 'end', 'go')):
+                    statements.append(statement)
+        
+        return statements
 
     def _reassemble_procedure(self, original: str, converted: str) -> str:
         """Use the LLM to create a SingleStore procedure from converted DML."""
